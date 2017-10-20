@@ -1,0 +1,167 @@
+\documentclass[letterpaper,10pt,titlepage,draftclsnofoot,onecolumn]{IEEEtran}
+
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{textcomp}
+\usepackage{geometry}
+\geometry{textheight=8.5in, textwidth=6in}
+\usepackage[hidelinks]{hyperref}
+\linespread{1}
+\def\name{Jonathan Harijanto}
+\usepackage{titling}
+\usepackage{listings}
+\lstset{
+basicstyle=\ttfamily,
+frame=single
+}
+\usepackage{filecontents}
+\usepackage[noadjust]{cite}
+
+\title{Lab 5: Windows Internals}
+\author{Jonathan Harijanto}
+\date{February 15, 2017}
+
+\begin{document}
+
+\maketitle
+\begin{center}
+CS 373: Defense Against the Dark Arts - Winter 2017
+\vfill
+\end{center}
+\begin{abstract}
+The purpose of this blog is to describe my observation when I dive deep into the Windows kernel.
+This blog will cover the testing methodology and the knowledge that was gain from completing the lab.
+
+\end{abstract}
+\newpage
+
+\section{Blog} 
+
+\subsection{What you looked at:}
+
+The topic for this week is Windows memory manipulation. 
+Aditya (the instructor) hoped that we could understand the concepts of stealth through memory manipulation and the basic knowledge of Windows kernel debug technique.
+There were supposedly five (5) different labs; however, he decided to cancel the fifth ones because he was running out of time.
+
+In these four labs, I looked at various malware called Agony, Zbot, and TDSS.
+The first three lab reports are about Agony \& Zbot analysis, and the fourth one is about TDSS.
+The tools that I used for these experiments were: 
+\begin{itemize}
+    \item Tuluka -- software to detect and remove rootkits.
+    \item Cuckoo -- software to analyze any malicious file inside a sandbox.
+    \item LiveKD -- a command tool that runs Kd and WinDbg.
+    \item ProcessHacker -- software to monitor system resources and detect malware.
+    \item WinDbg -- software to debug Windows kernel.
+    \item FakeNet -- a program to monitor network traffic.
+\end{itemize}
+
+\subsection{How you looked at it \& What you found:}
+
+\subsubsection{Lab 1}
+\hfill\\
+
+The first lab was more like an introduction to the Agony malware. 
+Thus, to obtain more information about this new malware, I need to run it on Cuckoo. 
+The steps were similar to the previous lab; I had to extract a zip file called Agony.zip from WindowsInternals folder with infected as the password, rename the file into bad, open FakeNet and run the command analyzer in Command Prompt.
+The results were surprising, I received 9 different bin files and a file called \verb|e2r355.ren|, while the live demo video had only 3 bin files.
+Fortunately, these differences didn't affect this lab at all. 
+
+I read the report produced by Cuckoo and concluded that this malware is a trojan.
+The next step was to run another software called Tuluka.
+I clicked on the \verb|SST| tab (near menu bar) and sorted the list by Suspicion.
+From the results, I found three suspicious functions which are: \verb|NtEnumerateValueKey|,
+\verb|NtQueryDirectoryFile|, \verb|NtQuerySystemInformation|.
+Using this software, I could see that these functions were hooked because each current address wasn't the pointing to the original address.
+
+To investigate this malware further, I launched LiveKD to explore inside kernel memory.
+I typed \verb|u <current address>| for each of the functions and viewed it from the stack perspective. 
+I could see that Agony pushed a new address that was referencing to \verb|wininit+| instead of \verb|nt!|'s original address.
+
+Now that I knew that the memory addresses were being manipulated, I had to patch them back.
+Fortunately, Tuluka has the ability to do so! 
+All I need to do was right-clicked on these infected functions such as \verb|NtQueryDirectoryFile|, and chose Restore Service. 
+Essentially, this functionality cut the hook and restored the pointer to its original address. 
+\hfill\\
+\subsubsection{Lab 2}
+\hfill\\
+
+In this second lab, I had to deal with a new malware called Zbot. 
+This malware is interesting because after it was being extracted from the zip, renamed into an executable file and double-clicked, it decided to delete itself from the Desktop.
+Next, Aditya told us that we had to open Notepad and ProcessHacker, then check for Notepad memory property using Process Hacker.
+The way to check the property of a program in ProcessHacker is to right-click and choose Properties on the designated running programs.
+
+The main reason why I had to open Notepad because some malware/ rootkit likes to hook Notepad's address and capture keystrokes.
+Anyhow, in the Properties table, I sorted the list based on file permissions and observed several processes only named as Private. 
+Among these Private processes, two of them has Read Write Execute permissions.
+I was suspicious these two because, based on the list, only a process with a name (example: Notepad.exe) that could have Read Execute permissions.
+In the end, the instructor finally revealed that Zbot is a malware that performed process injection. 
+Essentially, Zbot automatically spawned a process called Private when I opened Notepad.
+These Private processes were the ones that are going to capture everything I typed and send it to a server.
+In conclusion, Aditya warned us that a no name (a.k.a Private) process means that there exists a sneaky or malicious program inside our machine.
+\hfill\\
+\subsubsection{Lab 3 (Answer for TopHat - Agony additional questions included here!)}
+\hfill\\
+
+This lab is about kernel debugging; I'm required to run two different Windows machines (debuggee and debugger) for this debug process.
+In the debuggee machine, I had to execute Agony malware inside analyzer (Cuckoo) and opened Tuluka to see the hooking address.
+Next, in the debugger machine, I ran winDbg to use the Kernel Debug (press Ctrl + K) feature.
+The instructor, Aditya, told us to start debugging from NtEnumerateValueKey, then continued until NtQuerySystemInformation.
+
+The first step was to set a breakpoint at the \verb|NtEnumerateValueKey| hook address using a command \verb|bp 9d108480|.
+Then, I entered g to let the process run and hit the breakpoint.
+When it reached the breakpoint, I went to WinDbg menu bar, selected View and chose Call Stack to see the changes in the stack.
+Apparently, I saw an additional entry \verb|wininit+0x1480| being pushed into the stack.
+Next, I went to menu bar again, selected View and chose Disassembly to see the entire instruction code. 
+
+The question asked from TopHat was to find the offset of winnit instructions from the beginning of the function boundary.
+To do that, I had to step into the assembly instruction and locate the difference between initial and final hooked address. 
+For \verb|NtEnumerateValueKey| function, the initial addresses hooked by wininit was \verb|9d108480| and the last addresses hooked by wininit was \verb|9d1084d4|.
+Thus the offset was \verb|9d1084d4 - 9d108480 = 84| (decimal).
+
+I applied the same technique to find the offset instruction for the other two \verb|Nt| functions.
+For \verb|NtQueryDi| \verb|rectoryFile|, I set the breakpoint to \verb|9d108050| because that's the initial hooked address shown by Tuluka.
+I kept on stepping into the assembly instruction and found out that the final address hooked by wininit was \verb|9d108086|.
+Hence, the offset was \verb|9d108086 - 9d108050 = 54| (decimal).
+Lastly, for \verb|NtQuerySystemInformation|, the breakpoint was set to its intial hooked address which was \verb|9d107f00|.
+The last addresses shown by WinDbg was \verb|9d107f1a|.
+Thus, the offset for this API was \verb|9d107f1a - 9d107f00 = 26| (decimal).
+\hfill\\
+\subsubsection{Lab 4}
+\hfill\\
+
+This lab is a special one because Aditya didn't finish the lab.
+Thus, I decided to finish it on my own with the help of internet.
+For this lab, I had to analyze a new malware called TDSS.
+The only tools required for this lab section was WinDbg and Tuluka.
+First, I entered the command \verb|!devstack \device\harddisk| \verb|0\dr0|, in WinDbg, to what are the drivers that are serving disk (device stack). 
+Before the machine got infected, there were three different drivers: \verb|partmgr, Disk, LSI_SAS|.
+
+The next step was to extract the TDSS from zip and execute the malware.
+Surprisingly, when I re-entered the \verb|devstack| command, there were only two drivers left on the disk. 
+I noticed that LSI\_SAS was not a driver object anymore because TDSS infected it.
+According to the internet, the reason that could happen because the pointer that pointing to LSI\_SAS driver was now pointing to a fake driver object created by the malware.
+
+To investigate this issue, I need to test the non-infected LSI\_SAS beforehand. 
+I entered \verb|dt _device_ob| \verb|ject| \verb|85402f08| command, where \verb|85402f08| was the original address for LSI\_SAS before infected, to examine the device object data type.
+The result showed that the \verb|DriverObject| is pointing to \verb|85429e90|.
+Thus, I typed another command \verb|dt _driver_object 85429e90| to analyze that specific driver object data type further.
+As I expected, the result stated that the \verb|DriverStartIO| is pointing to null, which is correct because it showed that non-infected LSI\_SAS is not pointing to a fake driver.
+
+Things got interesting when I tested the infected LSI\_SAS. 
+I entered \verb|dt _device_object| command with the address given from the malware and, in the end, I could see that \verb|DriverStartIO| was pointing to some addresses instead of null.
+Hence, this result concluded that TDSS hooked the LSI\_SAS driver address to a fake driver so it could perform a malicious behavior inside the machine.
+\hfill\\
+\subsubsection{Programming Assignment}
+\hfill\\
+
+My program was written in Python. 
+This single python file is able to perform 5 different tasks assigned from TopHat.
+Also, I used an external library called \verb|psutil| for retrieving process information and system utilization.
+Thus, in order to run my program smoothly, it is required to download and install \verb|psutil| to your testing machine.
+
+\section{Conclusion}
+This week lab taught me a lot about Windows kernel internals.
+I didn't know that we could dive very deep into the kernel if using the right tools/ programs.
+Furthermore, I also learned using new software such as Tuluka, ProcessHacker, LiveKD and new features like Kernel Debug mode in WinDbg. 
+Last but not least, I was exposed to new security concepts like the hook.
+\end{document}
